@@ -520,8 +520,8 @@ void usb_com_vect()
 		}
 #endif
 		if (wIndex == CDC_COMM_INTERFACE) {
-			static char line[7] = {0x00, 0x4b, 0x00, 0x00, 0, 0, 8};
-			if (bmRequestType == 0x21) {
+			static char line[7] = {0x00, 0x4b, 0x00, 0x00, 0, 0, 8}; // default: 19200bps
+			if (bmRequestType == 0x21) { // recv from host
 				if (bRequest == CDC_SET_LINE_CODING) {
 					led(1);
 					usb_wait_receive_out();
@@ -533,22 +533,26 @@ void usb_com_vect()
 					return;
 				}
 			}
-			if (bmRequestType == 0xa1) {
+			if (bmRequestType == 0xa1) { // send to host
 				if (bRequest == CDC_GET_LINE_CODING) {
-					uint8_t j = 0;
 					len = 7;
-					do {
-						do {
-							i = UEINTX;
-						} while (!(i & ((1 << TXINI) | (1 << RXOUTI))));
-						if (i & (1 << RXOUTI)) return;
-						n = len < ENDPOINT0_SIZE ? len : ENDPOINT0_SIZE;
-						for (i = 0; i < n; i++) {
-							UEDATX = line[j++];
+					i = 0;
+					while (i < len) {
+						uint8_t ueintx = UEINTX;
+						if (ueintx & (1 << RXOUTI)) return;
+						if (ueintx & (1 << TXINI)) {
+							n = len - i;
+							if (n > ENDPOINT0_SIZE) {
+								n = ENDPOINT0_SIZE;
+							}
+							while (n > 0) {
+								UEDATX = line[i++];
+								len--;
+								n--;
+							}
+							usb_send_in();
 						}
-						len -= n;
-						usb_send_in();
-					} while (len || n == ENDPOINT0_SIZE);
+					}
 					return;
 				}
 			}
