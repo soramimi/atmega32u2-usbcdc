@@ -94,8 +94,8 @@ static const uint8_t PROGMEM device_descriptor[] = {
 	18, // bLength
 	1, // bDescriptorType
 	0x00, 0x02, // bcdUSB
-	0, // bDeviceClass
-	0, // bDeviceSubClass
+	2, // bDeviceClass
+	2, // bDeviceSubClass
 	0, // bDeviceProtocol
 	ENDPOINT0_SIZE, // bMaxPacketSize0
 	LSB(VENDOR_ID), MSB(VENDOR_ID), // idVendor
@@ -134,20 +134,20 @@ PROGMEM const uint8_t config1_descriptor[] = {
 	1, // USB_CFG_HAVE_INTRIN_ENDPOINT
 	2, // USB_CFG_INTERFACE_CLASS
 	2, // USB_CFG_INTERFACE_SUBCLASS
-	1, // USB_CFG_INTERFACE_PROTOCOL
+	0, // USB_CFG_INTERFACE_PROTOCOL
 	0, // string index for interface
 
 	// CDC Header
 	5,
 	0x24,
 	0,
-	0x01, 0x10,
+	0x10, 0x01,
 
 	// CDC ACM
 	4,
 	0x24,
 	2,
-	0x06,
+	0x02,
 
 	// CDC Union
 	5,
@@ -174,7 +174,6 @@ PROGMEM const uint8_t config1_descriptor[] = {
 	0, // USB_CFG_INTERFACE_SUBCLASS
 	0, // USB_CFG_INTERFACE_PROTOCOL,
 	0, // string index for interface
-
 	7, // sizeof(usbDescrEndpoint)
 	5,
 	DATA_IN_ENDPOINT | 0x80, // IN
@@ -520,15 +519,43 @@ void usb_com_vect()
 			}
 		}
 #endif
-//		if (wIndex == CDC_COMM_INTERFACE) {
-//			if (bmRequestType == 0xA1) {
-//			}
-//			if (bmRequestType == 0x21) {
-//			}
-//		} else if (wIndex == CDC_DATA_INTERFACE) {
-//			if (bRequest == HID_GET_REPORT && bmRequestType == 0xA1) {
-//			}
-//		}
+		if (wIndex == CDC_COMM_INTERFACE) {
+			static char line[7] = {0x00, 0x4b, 0x00, 0x00, 0, 0, 8};
+			if (bmRequestType == 0x21) {
+				if (bRequest == CDC_SET_LINE_CODING) {
+					led(1);
+					usb_wait_receive_out();
+					for (uint8_t i = 0; i < 7; i++) {
+						line[i] = UEDATX;
+					}
+					usb_ack_out();
+					usb_send_in();
+					return;
+				}
+			}
+			if (bmRequestType == 0xa1) {
+				if (bRequest == CDC_GET_LINE_CODING) {
+					uint8_t j = 0;
+					len = 7;
+					do {
+						do {
+							i = UEINTX;
+						} while (!(i & ((1 << TXINI) | (1 << RXOUTI))));
+						if (i & (1 << RXOUTI)) return;
+						n = len < ENDPOINT0_SIZE ? len : ENDPOINT0_SIZE;
+						for (i = 0; i < n; i++) {
+							UEDATX = line[j++];
+						}
+						len -= n;
+						usb_send_in();
+					} while (len || n == ENDPOINT0_SIZE);
+					return;
+				}
+			}
+			if (bmRequestType == CDC_SET_CONTROL_LINE_STATE) {
+				return;
+			}
+		}
 	}
 	UECONX = (1 << STALLRQ) | (1 << EPEN); // stall
 }
