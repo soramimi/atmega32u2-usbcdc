@@ -5,7 +5,7 @@
 #include <avr/io.h>
 #include "usb.h"
 
-extern void led(char f);
+void clear_buffers();
 
 /**************************************************************************
  *
@@ -216,11 +216,6 @@ static struct descriptor_list_struct {
 static volatile uint8_t usb_configuration = 0;
 static volatile uint8_t data_flush_timer = 0;
 static uint8_t idle_count = 0;
-uint8_t comm_tx_buffer[32];
-uint8_t data_tx_buffer[32];
-uint8_t data_rx_buffer[32];
-uint8_t data_rx_buffer_i;
-uint8_t data_rx_buffer_n;
 
 /**************************************************************************
  *
@@ -238,8 +233,7 @@ void usb_init()
 	USB_CONFIG(); // start USB clock
 	UDCON = 0; // enable attach resistor
 	usb_configuration = 0;
-	data_rx_buffer_i = 0;
-	data_rx_buffer_n = 0;
+	clear_buffers();
 	UDIEN = (1 << EORSTE) | (1 << SOFE);
 	sei();
 }
@@ -249,64 +243,93 @@ uint8_t is_usb_configured()
 	return usb_configuration;
 }
 
-int8_t usb_send_to_host(uint8_t ep, char const *ptr, uint8_t len)
+static inline void usb_release_tx()
 {
-	uint8_t i, intr_state, timeout;
-
-	if (!usb_configuration) return -1;
-	intr_state = SREG;
-	cli();
-	UENUM = ep;
-	timeout = UDFNUML + 50;
-	while (1) {
-		// are we ready to transmit?
-		if (UEINTX & (1 << RWAL)) break;
-		SREG = intr_state;
-		// has the USB gone offline?
-		if (!usb_configuration) return -1;
-		// have we waited too long?
-		if (UDFNUML == timeout) return -1;
-		// get ready to try checking again
-		intr_state = SREG;
-		cli();
-		UENUM = ep;
-	}
-	for (i = 0; i < len; i++) {
-		UEDATX = ptr[i];
-	}
-	UEINTX = 0x3A;
-	idle_count = 0;
-	SREG = intr_state;
-	return 0;
+	UEINTX = 0x3a; // FIFOCON=0 NAKINI=0 RWAL=1 NAKOUTI=1 RXSTPI=1 RXOUTI=0 STALLEDI=1 TXINI=0
 }
 
-void usb_data_tx(const uint8_t *ptr, uint8_t len)
+static inline void usb_release_rx()
 {
-	if (!ptr && len < 1) return;
-	usb_send_to_host(DATA_IN_ENDPOINT, ptr, len);
+	UEINTX = 0x6b; // FIFOCON=0 NAKINI=1 RWAL=1 NAKOUTI=0 RXSTPI=1 RXOUTI=0 STALLEDI=1 TXINI=1
+}
+
+static void usb_flush_rx(uint8_t ep)
+{
+	UENUM = ep;
+	if (UEBCLX != 0) {
+		usb_release_rx();
+	}
+}
+
+int8_t usb_send_to_host(uint8_t ep, uint8_t const *ptr, uint8_t len)
+{
+	int8_t r = -1;
+	if (!usb_configuration) return r;
+	uint8_t intr_state = SREG;
+	cli();
+	UENUM = ep;
+	uint8_t timeout = UDFNUML + 50;
+	while (1) {
+		if (UEINTX & (1 << RWAL)) {
+			for (uint8_t i = 0; i < len; i++) {
+				UEDATX = ptr[i];
+			}
+			usb_release_tx();
+			idle_count = 0;
+			r = 0;
+			break;
+		}
+		if (UDFNUML == timeout) break;
+	}
+	SREG = intr_state;
+	return r;
+}
+
+void usb_data_tx(uint8_t const *ptr, uint8_t len)
+{
+	if (ptr && len > 0) {
+		usb_send_to_host(DATA_IN_ENDPOINT, ptr, len);
+	}
 }
 
 uint8_t usb_data_rx(uint8_t *ptr, uint8_t len)
 {
-	if (!usb_configuration) return -1;
 	const uint8_t ep = DATA_OUT_ENDPOINT;
 	uint8_t n = 0;
 	uint8_t intr_state = SREG;
 	cli();
 	UENUM = ep;
-	uint8_t ueintx = UEINTX;
-	if (ueintx & (1 << RXOUTI)) {
-		if (ueintx & (1 << RWAL)) {
-			n = UEBCLX;
-			if (n > len) n = len;
-			for (uint8_t i = 0; i < n; i++) {
-				ptr[i] = UEDATX;
-			}
-		}
+	n = UEBCLX;
+	if (n > len) {
+		n = len;
 	}
-	UEINTX = 0x3A;
+	for (uint8_t i = 0; i < n; i++) {
+		ptr[i] = UEDATX;
+	}
+	if (n > 0 && UEBCLX == 0) {
+		usb_release_rx();
+	}
 	SREG = intr_state;
 	return n;
+}
+
+uint8_t usb_read_available_()
+{
+	if (!usb_configuration) return 0;
+	const uint8_t ep = DATA_OUT_ENDPOINT;
+	uint8_t intr_state = SREG;
+	cli();
+	UENUM = ep;
+	uint8_t n = UEBCLX;
+	SREG = intr_state;
+	return n;
+}
+
+uint8_t usb_read_byte_()
+{
+	uint8_t c;
+	usb_data_rx(&c, 1);
+	return c;
 }
 
 /**************************************************************************
@@ -320,11 +343,10 @@ uint8_t usb_data_rx(uint8_t *ptr, uint8_t len)
 //
 void usb_gen_vect()
 {
-	uint8_t intbits;
-
-	intbits = UDINT;
+	uint8_t udint = UDINT;
 	UDINT = 0;
-	if (intbits & (1 << EORSTI)) {
+
+	if (udint & (1 << EORSTI)) {
 		UENUM = 0;
 		UECONX = 1;
 		UECFG0X = EP_TYPE_CONTROL;
@@ -332,8 +354,11 @@ void usb_gen_vect()
 		UEIENX = (1 << RXSTPE);
 		usb_configuration = 0;
 	}
-}
 
+	if (udint & (1 << SOFI)) {
+		usb_flush_rx(DATA_IN_ENDPOINT);
+	}
+}
 ISR(USB_GEN_vect)
 {
 	usb_gen_vect();
@@ -499,7 +524,7 @@ void usb_com_vect()
 			static char line[7] = {0x00, 0x4b, 0x00, 0x00, 0, 0, 8}; // default: 19200bps
 			if (bmRequestType == 0x21) { // recv from host
 				if (bRequest == CDC_SET_LINE_CODING) {
-					led(1);
+					clear_buffers();
 					usb_wait_receive_out();
 					for (uint8_t i = 0; i < 7; i++) {
 						line[i] = UEDATX;
@@ -539,7 +564,6 @@ void usb_com_vect()
 	}
 	UECONX = (1 << STALLRQ) | (1 << EPEN); // stall
 }
-
 ISR(USB_COM_vect)
 {
 	usb_com_vect();
