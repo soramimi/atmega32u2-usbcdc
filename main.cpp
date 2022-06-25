@@ -1,27 +1,5 @@
-/*
- * Copyright (c) 2012 Fredrik Atmer, Bathroom Epiphanies Inc
- * http://bathroomepiphanies.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
-
-// CDC - Copyright (C) 2022 S.Fuchita (@soramimi_jp)
+// USB-CDC ATMEGA32U2
+// Copyright (C) 2022 S.Fuchita (@soramimi_jp)
 
 #include "usb.h"
 #include <avr/interrupt.h>
@@ -82,14 +60,14 @@ void setup()
 	TIMSK0 |= 1 << TOIE0;
 
 	usb_init();
-	while (!usb_configured()) {
+	while (!is_usb_configured()) {
 		_delay_ms(100);
 	}
 }
 
 void loop()
 {
-	char tmp[8];
+	uint8_t tmp[8];
 	uint8_t n = usb_data_rx(tmp, sizeof(tmp));
 	usb_data_tx(tmp, n);
 }

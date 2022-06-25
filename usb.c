@@ -1,35 +1,10 @@
-/* CDC
- * http://www.pjrc.com/teensy/usb_keyboard.html
- * Copyright (c) 2009 PJRC.COM, LLC
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
-
-// Version 1.0: Initial Release
-// Version 1.1: Add support for Teensy 2.0
-// 2012-09-07: Added the bootload jump routine /Fredrik Atmer
-
-// 2022-05-19: Modified by S.Fuchita (@soramimi_jp)
+// USB CDC-ACM for ATMEGA32U2
+// Copyright (C) 2022 S.Fuchita (@soramimi_jp)
 
 #define USB_SERIAL_PRIVATE_INCLUDE
 #include <avr/io.h>
 #include "usb.h"
+
 extern void led(char f);
 
 /**************************************************************************
@@ -62,7 +37,7 @@ extern void led(char f);
  *
  **************************************************************************/
 
-#define ENDPOINT0_SIZE 32
+#define ENDPOINT0_SIZE 8
 
 #define CDC_COMM_INTERFACE 0
 #define COMM_IN_ENDPOINT 2
@@ -72,9 +47,9 @@ extern void led(char f);
 #define DATA_IN_ENDPOINT 4
 
 static const uint8_t PROGMEM endpoint_config_table[] = {
-	COMM_IN_ENDPOINT, EP_TYPE_INTERRUPT_IN, EP_SIZE(8) | EP_DOUBLE_BUFFER,
-	DATA_OUT_ENDPOINT, EP_TYPE_BULK_OUT, EP_SIZE(8) | EP_DOUBLE_BUFFER,
-	DATA_IN_ENDPOINT, EP_TYPE_BULK_IN, EP_SIZE(8) | EP_DOUBLE_BUFFER,
+	COMM_IN_ENDPOINT, EP_TYPE_INTERRUPT_IN, EP_SIZE(COMM_EP_SIZE) | EP_DOUBLE_BUFFER,
+	DATA_OUT_ENDPOINT, EP_TYPE_BULK_OUT, EP_SIZE(RX_EP_SIZE) | EP_DOUBLE_BUFFER,
+	DATA_IN_ENDPOINT, EP_TYPE_BULK_IN, EP_SIZE(TX_EP_SIZE) | EP_DOUBLE_BUFFER,
 	0,
 };
 
@@ -141,13 +116,13 @@ PROGMEM const uint8_t config1_descriptor[] = {
 	5,
 	0x24,
 	0,
-	0x10, 0x01,
+	0x01, 0x10,
 
 	// CDC ACM
 	4,
 	0x24,
 	2,
-	0x02,
+	0x06,
 
 	// CDC Union
 	5,
@@ -160,8 +135,8 @@ PROGMEM const uint8_t config1_descriptor[] = {
 	5, // USBDESCR_ENDPOINT
 	COMM_IN_ENDPOINT | 0x80, // IN endpoint
 	0x03, // attrib: Interrupt endpoint
-	8, 0, // maximum packet size
-	255, // USB_CFG_INTR_POLL_INTERVAL
+	COMM_EP_SIZE, 0, // maximum packet size
+	64, // USB_CFG_INTR_POLL_INTERVAL
 
 	// data interface
 
@@ -174,18 +149,19 @@ PROGMEM const uint8_t config1_descriptor[] = {
 	0, // USB_CFG_INTERFACE_SUBCLASS
 	0, // USB_CFG_INTERFACE_PROTOCOL,
 	0, // string index for interface
-	7, // sizeof(usbDescrEndpoint)
-	5,
-	DATA_IN_ENDPOINT | 0x80, // IN
-	0x02, // bulk
-	8, 0, // maximum packet size
-	0, // USB_CFG_INTR_POLL_INTERVAL
 
 	7, // sizeof(usbDescrEndpoint)
 	5,
 	DATA_OUT_ENDPOINT, // OUT
 	0x02, // bulk
-	8, 0, // maximum packet size
+	RX_EP_SIZE, 0, // maximum packet size
+	0, // USB_CFG_INTR_POLL_INTERVAL
+
+	7, // sizeof(usbDescrEndpoint)
+	5,
+	DATA_IN_ENDPOINT | 0x80, // IN
+	0x02, // bulk
+	TX_EP_SIZE, 0, // maximum packet size
 	0, // USB_CFG_INTR_POLL_INTERVAL
 };
 
@@ -268,7 +244,7 @@ void usb_init()
 	sei();
 }
 
-uint8_t usb_configured()
+uint8_t is_usb_configured()
 {
 	return usb_configuration;
 }
@@ -304,13 +280,13 @@ int8_t usb_send_to_host(uint8_t ep, char const *ptr, uint8_t len)
 	return 0;
 }
 
-void usb_data_tx(char const *ptr, uint8_t len)
+void usb_data_tx(const uint8_t *ptr, uint8_t len)
 {
 	if (!ptr && len < 1) return;
 	usb_send_to_host(DATA_IN_ENDPOINT, ptr, len);
 }
 
-uint8_t usb_data_rx(char *ptr, uint8_t len)
+uint8_t usb_data_rx(uint8_t *ptr, uint8_t len)
 {
 	if (!usb_configuration) return -1;
 	const uint8_t ep = DATA_OUT_ENDPOINT;

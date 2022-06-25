@@ -8,24 +8,22 @@
 extern "C" {
 #endif
 
-void usb_init(void); // initialize everything
-uint8_t usb_configured(void); // is the USB port configured
+void usb_init(void);
+uint8_t is_usb_configured(void);
 
-extern uint8_t comm_tx_buffer[32];
-extern uint8_t data_tx_buffer[32];
-extern uint8_t data_rx_buffer[32];
-extern uint8_t data_rx_buffer_i;
-extern uint8_t data_rx_buffer_n;
-
-void usb_data_tx(const char *ptr, uint8_t len); // transmit a character
-uint8_t usb_data_rx(char *ptr, uint8_t len);
+void usb_data_tx(const uint8_t *ptr, uint8_t len);
+uint8_t usb_data_rx(uint8_t *ptr, uint8_t len);
 
 #ifdef __cplusplus
 }
 #endif
 
-// Everything below this point is only intended for usb_serial.c
-//#ifdef USB_SERIAL_PRIVATE_INCLUDE
+#define COMM_EP_SIZE 8
+#define TX_EP_SIZE 8
+#define RX_EP_SIZE 8
+
+
+
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <avr/pgmspace.h>
