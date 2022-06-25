@@ -162,9 +162,7 @@ void setup()
 void loop()
 {
 	usb_poll();
-//	uint8_t tmp[8];
-//	uint8_t n = usb_data_rx(tmp, sizeof(tmp));
-//	usb_data_tx(tmp, n);
+
 	if (usb_read_available()) {
 		uint8_t c = usb_read_byte();
 		usb_write_byte(c);
